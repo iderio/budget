@@ -14,7 +14,7 @@
       <section class="card">
         <h2>Upload Receipt</h2>
         <p class="muted">Upload a receipt image to classify each line item and extract dollar amounts.</p>
-        <form action="/upload" method="post" enctype="multipart/form-data">
+        <form action="{{ url_for('upload_receipt') }}" method="post" enctype="multipart/form-data">
           <input type="file" name="receipt" accept="image/*" required />
           <button type="submit">Process receipt</button>
         </form>
@@ -62,7 +62,7 @@
 
       <section class="card">
         <h2>Set / Update Category Budget</h2>
-        <form action="/set-budget" method="post" class="inline-form">
+        <form action="{{ url_for('set_budget') }}" method="post" class="inline-form">
           <input type="text" name="category" list="categories" placeholder="Category" required />
           <datalist id="categories">
             {% for category in categories %}
@@ -101,7 +101,7 @@
       {% for batch in pending_batches %}
       <section class="card alert">
         <h2>Need your input for uncategorized items</h2>
-        <form action="/resolve" method="post">
+        <form action="{{ url_for('resolve_pending') }}" method="post">
           <input type="hidden" name="batch_id" value="{{ batch.id }}" />
           {% for item in batch.items %}
           <div class="pending-item">
