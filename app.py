@@ -46,6 +46,24 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
+def configure_logging():
+    if logger.handlers:
+        return
+
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    )
+    logger.setLevel(level)
+    logger.addHandler(handler)
+    logger.propagate = False
+
+
+configure_logging()
+
+
 def ensure_storage():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -204,14 +222,35 @@ def set_budget():
 
 @app.route("/upload", methods=["POST"])
 def upload_receipt():
+    logger.info(
+        "Upload request received: path=%s content_type=%s content_length=%s file_fields=%s",
+        request.path,
+        request.content_type,
+        request.content_length,
+        list(request.files.keys()),
+    )
     receipt = request.files.get("receipt")
     if not receipt or receipt.filename == "":
+        logger.warning(
+            "Upload rejected: missing or empty 'receipt' file field. available_fields=%s",
+            list(request.files.keys()),
+        )
         return redirect(url_for("index"))
 
     store = load_store()
     file_id = f"{uuid.uuid4().hex}_{receipt.filename}"
     saved_path = UPLOAD_DIR / file_id
-    receipt.save(saved_path)
+    logger.info(
+        "Saving upload filename='%s' mimetype='%s' to path=%s",
+        receipt.filename,
+        receipt.mimetype,
+        saved_path,
+    )
+    try:
+        receipt.save(saved_path)
+    except Exception:
+        logger.exception("Failed to persist uploaded receipt '%s'", receipt.filename)
+        return redirect(url_for("index"))
     logger.info("Saved uploaded receipt '%s' to %s", receipt.filename, saved_path)
 
     try:
@@ -219,9 +258,20 @@ def upload_receipt():
     except Exception:
         logger.exception("Failed to extract OCR text from uploaded receipt '%s'", receipt.filename)
         return redirect(url_for("index"))
+    logger.info(
+        "OCR extraction complete for '%s': text_length=%s",
+        receipt.filename,
+        len(text),
+    )
 
     raw_items = parse_line_items(text)
     logger.info("Parsed %s line item(s) from receipt '%s'", len(raw_items), receipt.filename)
+    if not raw_items:
+        logger.warning(
+            "No line items parsed from receipt '%s'. OCR preview='%s'",
+            receipt.filename,
+            re.sub(r"\s+", " ", text[:160]).strip(),
+        )
     resolved = []
     unresolved = []
     upload_items = []
@@ -235,9 +285,11 @@ def upload_receipt():
 
         payload = {**item, "category": category or ""}
         if category:
+            logger.debug("Classified item '%s' as '%s'", item["name"], category)
             resolved.append(payload)
             upload_items.append({**payload, "status": "classified"})
         else:
+            logger.debug("Could not classify item '%s'", item["name"])
             unresolved.append(payload)
             upload_items.append({**payload, "status": "needs_input"})
 
