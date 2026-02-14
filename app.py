@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -97,22 +98,160 @@ def current_month_key() -> str:
 
 def parse_line_items(text: str):
     items = []
+
+    def _append_item(name_token: str, amount_token: str):
+        name = re.sub(r"\s+", " ", name_token).strip("- :|")
+        if len(re.findall(r"[A-Za-z]", name)) < 2:
+            return
+
+        if re.search(r"\b(total|subtotal|tax|change|cash|visa|mastercard)\b", name, re.IGNORECASE):
+            return
+
+        normalized_amount = (
+            amount_token.replace("$", "")
+            .replace("€", "")
+            .replace("£", "")
+            .replace(",", ".")
+        )
+        try:
+            amount = float(normalized_amount)
+        except ValueError:
+            return
+
+        items.append({"name": name, "amount": amount})
+
+    # First pass: preserve line-based extraction for well-formed OCR output.
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        if not line:
+        if not line or "|" in line:
             continue
-        match = re.search(r"(.+?)\s+([\$€£]?\d+[\.,]\d{2})$", line)
-        if not match:
-            continue
-        name = re.sub(r"\s+", " ", match.group(1)).strip("- ")
-        amount_token = match.group(2).replace("$", "").replace("€", "").replace("£", "").replace(",", ".")
-        try:
-            amount = float(amount_token)
-        except ValueError:
-            continue
-        items.append({"name": name, "amount": amount})
+        match = re.search(r"(.+?)\s+([\$€£]?\d+[\.,]\d{2})(?:\s*[A-Za-z])?$", line)
+        if match:
+            _append_item(match.group(1), match.group(2))
+
+    # Fallback: OCR can collapse receipts into pipe-delimited fragments.
+    if not items:
+        for fragment in re.split(r"\|", text):
+            segment = fragment.strip()
+            if not segment:
+                continue
+
+            match = re.search(r"(.+?)\s+([\$€£]?\d+[\.,]\d{2})(?:\s*[A-Za-z])?$", segment)
+            if match:
+                _append_item(match.group(1), match.group(2))
+
     return items
 
+
+
+
+def parse_line_items_with_openai(image_path: Path):
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return []
+
+    model = os.getenv("OPENAI_RECEIPT_MODEL", "gpt-4.1-mini")
+
+    mime = "image/jpeg"
+    suffix = image_path.suffix.lower()
+    if suffix == ".png":
+        mime = "image/png"
+    elif suffix in {".webp"}:
+        mime = "image/webp"
+
+    b64_image = base64.b64encode(image_path.read_bytes()).decode("ascii")
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "amount": {"type": "number"},
+                    },
+                    "required": ["name", "amount"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+
+    payload = {
+        "model": model,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            "Extract purchased line items from this receipt image. "
+                            "Return JSON only with `items`, where each item has `name` and numeric `amount`. "
+                            "Exclude totals, taxes, payments, and store metadata."
+                        ),
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{mime};base64,{b64_image}",
+                    },
+                ],
+            }
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "receipt_line_items",
+                "schema": schema,
+                "strict": True,
+            }
+        },
+    }
+
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=20,
+        )
+        response.raise_for_status()
+        content = response.json()
+    except requests.RequestException:
+        logger.exception("OpenAI receipt extraction request failed")
+        return []
+
+    output_text = content.get("output_text", "")
+    if not output_text:
+        return []
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError:
+        logger.warning("OpenAI receipt extraction returned non-JSON output")
+        return []
+
+    items = []
+    for raw_item in parsed.get("items", []):
+        if not isinstance(raw_item, dict):
+            continue
+        name = str(raw_item.get("name", "")).strip()
+        if not name:
+            continue
+        try:
+            amount = float(raw_item.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        items.append({"name": name, "amount": amount})
+
+    return items
 
 def classify_from_existing(item_name: str, classifications: dict):
     normalized = item_name.lower()
@@ -253,19 +392,32 @@ def upload_receipt():
         return redirect(url_for("index"))
     logger.info("Saved uploaded receipt '%s' to %s", receipt.filename, saved_path)
 
-    try:
-        text = extract_text_from_image(saved_path)
-    except Exception:
-        logger.exception("Failed to extract OCR text from uploaded receipt '%s'", receipt.filename)
-        return redirect(url_for("index"))
-    logger.info(
-        "OCR extraction complete for '%s': text_length=%s",
-        receipt.filename,
-        len(text),
-    )
+    raw_items = []
+    use_openai_parser = os.getenv("USE_OPENAI_RECEIPT_PARSER", "").lower() in {"1", "true", "yes"}
+    if use_openai_parser:
+        raw_items = parse_line_items_with_openai(saved_path)
+        logger.info(
+            "OpenAI extraction complete for '%s': parsed_items=%s",
+            receipt.filename,
+            len(raw_items),
+        )
 
-    raw_items = parse_line_items(text)
-    logger.info("Parsed %s line item(s) from receipt '%s'", len(raw_items), receipt.filename)
+    text = ""
+    if not raw_items:
+        try:
+            text = extract_text_from_image(saved_path)
+        except Exception:
+            logger.exception("Failed to extract OCR text from uploaded receipt '%s'", receipt.filename)
+            return redirect(url_for("index"))
+        logger.info(
+            "OCR extraction complete for '%s': text_length=%s",
+            receipt.filename,
+            len(text),
+        )
+
+        raw_items = parse_line_items(text)
+        logger.info("Parsed %s line item(s) from receipt '%s'", len(raw_items), receipt.filename)
+
     if not raw_items:
         logger.warning(
             "No line items parsed from receipt '%s'. OCR preview='%s'",
