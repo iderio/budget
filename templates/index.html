@@ -16,6 +16,13 @@
         <p class="muted">Upload a receipt image to classify each line item and extract dollar amounts.</p>
         <form action="{{ url_for('upload_receipt') }}" method="post" enctype="multipart/form-data">
           <input type="file" name="receipt" accept="image/*" required />
+          <label>
+            Extraction method
+            <select name="extraction_mode">
+              <option value="ocr" {% if default_extraction_mode == 'ocr' %}selected{% endif %}>OCR parser</option>
+              <option value="llm" {% if default_extraction_mode == 'llm' %}selected{% endif %}>LLM parser</option>
+            </select>
+          </label>
           <button type="submit">Process receipt</button>
         </form>
       </section>
@@ -27,7 +34,9 @@
           <article class="upload-result">
             <header>
               <h3>{{ upload.filename }}</h3>
-              <p>{{ upload.created_at }} · Total: ${{ '%.2f'|format(upload.total) }}</p>
+              <p>
+                {{ upload.created_at }} · Method: {{ upload.get('mode', 'n/a')|upper }} · Total: ${{ '%.2f'|format(upload.total) }}
+              </p>
             </header>
             <table>
               <thead>
@@ -103,7 +112,7 @@
         <h2>Need your input for uncategorized items</h2>
         <form action="{{ url_for('resolve_pending') }}" method="post">
           <input type="hidden" name="batch_id" value="{{ batch.id }}" />
-          {% for item in batch.items %}
+          {% for item in batch["items"] %}
           <div class="pending-item">
             <span>{{ item.name }} — ${{ '%.2f'|format(item.amount) }}</span>
             <input type="text" name="category_{{ loop.index0 }}" list="categories" placeholder="Choose category" required />

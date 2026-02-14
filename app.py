@@ -331,6 +331,11 @@ def index():
     summary = month_summary(store)
     pendings = list(store["pending"].values())
     recent_uploads = list(reversed(store.get("recent_uploads", [])))
+    default_extraction_mode = (
+        "llm"
+        if os.getenv("USE_OPENAI_RECEIPT_PARSER", "").lower() in {"1", "true", "yes"}
+        else "ocr"
+    )
     return render_template(
         "index.html",
         summary=summary,
@@ -338,6 +343,7 @@ def index():
         pending_batches=pendings,
         recent_uploads=recent_uploads,
         month=current_month_key(),
+        default_extraction_mode=default_extraction_mode,
     )
 
 
@@ -392,18 +398,24 @@ def upload_receipt():
         return redirect(url_for("index"))
     logger.info("Saved uploaded receipt '%s' to %s", receipt.filename, saved_path)
 
+    selected_mode = request.form.get("extraction_mode", "").strip().lower()
+    if selected_mode not in {"ocr", "llm"}:
+        selected_mode = (
+            "llm"
+            if os.getenv("USE_OPENAI_RECEIPT_PARSER", "").lower() in {"1", "true", "yes"}
+            else "ocr"
+        )
+
     raw_items = []
-    use_openai_parser = os.getenv("USE_OPENAI_RECEIPT_PARSER", "").lower() in {"1", "true", "yes"}
-    if use_openai_parser:
+    text = ""
+    if selected_mode == "llm":
         raw_items = parse_line_items_with_openai(saved_path)
         logger.info(
-            "OpenAI extraction complete for '%s': parsed_items=%s",
+            "LLM extraction complete for '%s': parsed_items=%s",
             receipt.filename,
             len(raw_items),
         )
-
-    text = ""
-    if not raw_items:
+    else:
         try:
             text = extract_text_from_image(saved_path)
         except Exception:
@@ -419,10 +431,12 @@ def upload_receipt():
         logger.info("Parsed %s line item(s) from receipt '%s'", len(raw_items), receipt.filename)
 
     if not raw_items:
+        preview = re.sub(r"\s+", " ", text[:160]).strip() if text else "n/a"
         logger.warning(
-            "No line items parsed from receipt '%s'. OCR preview='%s'",
+            "No line items parsed from receipt '%s' using mode='%s'. OCR preview='%s'",
             receipt.filename,
-            re.sub(r"\s+", " ", text[:160]).strip(),
+            selected_mode,
+            preview,
         )
     resolved = []
     unresolved = []
@@ -465,6 +479,7 @@ def upload_receipt():
                 "filename": receipt.filename,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "items": upload_items,
+                "mode": selected_mode,
                 "total": round(sum(item["amount"] for item in raw_items), 2),
             }
         )
