@@ -22,6 +22,11 @@ class ApiRoutesTests(unittest.TestCase):
         self.assertIn('Interactive API docs', response.text)
 
 
+    def test_tracker_route_is_available(self) -> None:
+        response = self.client.get('/tracker/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Receipt Budget Tracker', response.text)
+
 
 class ClassifierTests(unittest.TestCase):
     def test_normalize_label_exact_match(self) -> None:
