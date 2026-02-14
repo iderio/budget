@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Receipt Budget Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Receipt Budget Tracker</h1>
+      <p>Track monthly spend by category using receipt uploads and auto-classification.</p>
+
+      <section class="card">
+        <h2>Upload Receipt</h2>
+        <form action="/upload" method="post" enctype="multipart/form-data">
+          <input type="file" name="receipt" accept="image/*" required />
+          <button type="submit">Process receipt</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Set / Update Category Budget</h2>
+        <form action="/set-budget" method="post" class="inline-form">
+          <input type="text" name="category" list="categories" placeholder="Category" required />
+          <datalist id="categories">
+            {% for category in categories %}
+            <option value="{{ category }}"></option>
+            {% endfor %}
+          </datalist>
+          <input type="number" name="amount" step="0.01" min="0" placeholder="Monthly budget" required />
+          <button type="submit">Save budget</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>{{ month }} Budget Status</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Spent</th>
+              <th>Budget</th>
+              <th>Remaining</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in summary %}
+            <tr>
+              <td>{{ row.category }}</td>
+              <td>${{ '%.2f'|format(row.spent) }}</td>
+              <td>${{ '%.2f'|format(row.budget) }}</td>
+              <td class="{{ 'over' if row.remaining < 0 else 'ok' }}">${{ '%.2f'|format(row.remaining) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      {% for batch in pending_batches %}
+      <section class="card alert">
+        <h2>Need your input for uncategorized items</h2>
+        <form action="/resolve" method="post">
+          <input type="hidden" name="batch_id" value="{{ batch.id }}" />
+          {% for item in batch.items %}
+          <div class="pending-item">
+            <span>{{ item.name }} — ${{ '%.2f'|format(item.amount) }}</span>
+            <input type="text" name="category_{{ loop.index0 }}" list="categories" placeholder="Choose category" required />
+          </div>
+          {% endfor %}
+          <button type="submit">Apply categories</button>
+        </form>
+      </section>
+      {% endfor %}
+    </main>
+  </body>
+</html>
