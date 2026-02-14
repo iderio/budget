@@ -13,10 +13,51 @@
 
       <section class="card">
         <h2>Upload Receipt</h2>
+        <p class="muted">Upload a receipt image to classify each line item and extract dollar amounts.</p>
         <form action="/upload" method="post" enctype="multipart/form-data">
           <input type="file" name="receipt" accept="image/*" required />
           <button type="submit">Process receipt</button>
         </form>
+      </section>
+
+      <section class="card">
+        <h2>Latest Classification Results</h2>
+        {% if recent_uploads %}
+          {% for upload in recent_uploads %}
+          <article class="upload-result">
+            <header>
+              <h3>{{ upload.filename }}</h3>
+              <p>{{ upload.created_at }} · Total: ${{ '%.2f'|format(upload.total) }}</p>
+            </header>
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Classification</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in upload['items'] %}
+                <tr>
+                  <td>{{ item.name }}</td>
+                  <td>
+                    {% if item.category %}
+                      {{ item.category }}
+                    {% else %}
+                      <span class="pill">Needs input</span>
+                    {% endif %}
+                  </td>
+                  <td>${{ '%.2f'|format(item.amount) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </article>
+          {% endfor %}
+        {% else %}
+          <p class="muted">No receipts processed yet. Upload one to see per-item classifications and amounts.</p>
+        {% endif %}
       </section>
 
       <section class="card">

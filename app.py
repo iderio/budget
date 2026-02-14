@@ -55,13 +55,16 @@ def ensure_storage():
             },
             "expenses": {},
             "pending": {},
+            "recent_uploads": [],
         }
         STORE_FILE.write_text(json.dumps(seed, indent=2))
 
 
 def load_store():
     ensure_storage()
-    return json.loads(STORE_FILE.read_text())
+    store = json.loads(STORE_FILE.read_text())
+    store.setdefault("recent_uploads", [])
+    return store
 
 
 def save_store(store):
@@ -168,11 +171,13 @@ def index():
     store = load_store()
     summary = month_summary(store)
     pendings = list(store["pending"].values())
+    recent_uploads = list(reversed(store.get("recent_uploads", [])))
     return render_template(
         "index.html",
         summary=summary,
         categories=sorted(store["budgets"].keys()),
         pending_batches=pendings,
+        recent_uploads=recent_uploads,
         month=current_month_key(),
     )
 
@@ -214,6 +219,7 @@ def upload_receipt():
     raw_items = parse_line_items(text)
     resolved = []
     unresolved = []
+    upload_items = []
 
     for item in raw_items:
         category = classify_from_existing(item["name"], store["classifications"])
@@ -225,8 +231,10 @@ def upload_receipt():
         payload = {**item, "category": category or ""}
         if category:
             resolved.append(payload)
+            upload_items.append({**payload, "status": "classified"})
         else:
             unresolved.append(payload)
+            upload_items.append({**payload, "status": "needs_input"})
 
     month = current_month_key()
     store["expenses"].setdefault(month, [])
@@ -235,6 +243,18 @@ def upload_receipt():
     if unresolved:
         batch_id = uuid.uuid4().hex
         store["pending"][batch_id] = {"id": batch_id, "items": unresolved}
+
+    if raw_items:
+        store["recent_uploads"].append(
+            {
+                "id": uuid.uuid4().hex,
+                "filename": receipt.filename,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "items": upload_items,
+                "total": round(sum(item["amount"] for item in raw_items), 2),
+            }
+        )
+        store["recent_uploads"] = store["recent_uploads"][-5:]
 
     save_store(store)
     return redirect(url_for("index"))
