@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import uuid
@@ -42,6 +43,7 @@ KEYWORD_MAP = {
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 def ensure_storage():
@@ -210,13 +212,16 @@ def upload_receipt():
     file_id = f"{uuid.uuid4().hex}_{receipt.filename}"
     saved_path = UPLOAD_DIR / file_id
     receipt.save(saved_path)
+    logger.info("Saved uploaded receipt '%s' to %s", receipt.filename, saved_path)
 
     try:
         text = extract_text_from_image(saved_path)
     except Exception:
+        logger.exception("Failed to extract OCR text from uploaded receipt '%s'", receipt.filename)
         return redirect(url_for("index"))
 
     raw_items = parse_line_items(text)
+    logger.info("Parsed %s line item(s) from receipt '%s'", len(raw_items), receipt.filename)
     resolved = []
     unresolved = []
     upload_items = []
@@ -243,6 +248,11 @@ def upload_receipt():
     if unresolved:
         batch_id = uuid.uuid4().hex
         store["pending"][batch_id] = {"id": batch_id, "items": unresolved}
+        logger.info(
+            "Receipt '%s' has %s unresolved item(s) pending clarification",
+            receipt.filename,
+            len(unresolved),
+        )
 
     if raw_items:
         store["recent_uploads"].append(
@@ -257,6 +267,12 @@ def upload_receipt():
         store["recent_uploads"] = store["recent_uploads"][-5:]
 
     save_store(store)
+    logger.info(
+        "Processed receipt '%s': resolved=%s, unresolved=%s",
+        receipt.filename,
+        len(resolved),
+        len(unresolved),
+    )
     return redirect(url_for("index"))
 
 
