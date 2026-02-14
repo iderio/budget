@@ -1,10 +1,35 @@
+import importlib.util
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.wsgi import WSGIMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.classifier import ClassificationError, classify_with_llm
 
 app = FastAPI(title="LLM Classification API", version="1.0.0")
+
+
+def _load_receipt_tracker_app():
+    """Load the Flask receipt tracker app from the repository root."""
+    repo_root = Path(__file__).resolve().parents[1]
+    flask_app_path = repo_root / "app.py"
+    if not flask_app_path.exists():
+        return None
+
+    spec = importlib.util.spec_from_file_location("receipt_tracker_app", flask_app_path)
+    if not spec or not spec.loader:
+        return None
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, "app", None)
+
+
+receipt_tracker_app = _load_receipt_tracker_app()
+if receipt_tracker_app is not None:
+    app.mount("/tracker", WSGIMiddleware(receipt_tracker_app))
 
 
 class ClassificationRequest(BaseModel):
@@ -36,6 +61,7 @@ LANDING_PAGE = """<!doctype html>
     <p>Service is running.</p>
     <ul>
       <li><a href=\"/docs\">Interactive API docs</a></li>
+      <li><a href=\"/tracker/\">Receipt upload UI</a></li>
       <li><code>GET /health</code></li>
       <li><code>POST /classify</code></li>
     </ul>
