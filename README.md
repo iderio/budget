@@ -79,6 +79,52 @@ python app.py
 
 Open http://localhost:5000.
 
+## Run with Docker
+
+If you have a published image for this app, pull and run it like this:
+
+```bash
+docker pull <registry>/<namespace>/receipt-budget-tracker:latest
+docker run --rm -p 5000:5000 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/uploads:/app/uploads \
+  <registry>/<namespace>/receipt-budget-tracker:latest
+```
+
+If you are building and running locally from this repo, use:
+
+```bash
+docker build -t receipt-budget-tracker:local .
+docker run --rm -p 5000:5000 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/uploads:/app/uploads \
+  receipt-budget-tracker:local
+```
+
+### Mount points
+
+- `/app/data` → persists `store.json` (budgets, classifications, expenses, pending items).
+- `/app/uploads` → persists uploaded receipt files.
+
+Both mounts are optional, but recommended so data survives container restarts.
+
+## Image upload format
+
+The receipt upload endpoint is `POST /upload` and expects:
+
+- `Content-Type: multipart/form-data`
+- File field name: `receipt`
+- Max payload size: **10 MB** per upload
+
+Example `curl` upload:
+
+```bash
+curl -X POST http://localhost:5000/upload \
+  -F "receipt=@/path/to/receipt.jpg"
+```
+
+The app relies on Pillow + Tesseract OCR, so use clear receipt images (PNG or JPEG recommended).
+
 ## Notes
 
 - Receipts with non-standard formatting may require manual category assignment.
