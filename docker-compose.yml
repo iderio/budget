@@ -1,0 +1,13 @@
+services:
+  llm-classifier:
+    build:
+      context: .
+    image: llm-classifier:latest
+    platform: linux/amd64
+    ports:
+      - "8080:8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      CLASSIFIER_MODEL: ${CLASSIFIER_MODEL:-gpt-4o-mini}
+    restart: unless-stopped
