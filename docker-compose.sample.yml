@@ -1,0 +1,15 @@
+services:
+  llm-classifier:
+    build:
+      context: .
+    image: llm-classifier:latest
+    container_name: llm-classifier
+    ports:
+      - "8080:8080"
+    environment:
+      # Required for OpenAI-hosted models.
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Optional for OpenAI-compatible endpoints.
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      CLASSIFIER_MODEL: ${CLASSIFIER_MODEL:-gpt-4o-mini}
+    restart: unless-stopped
